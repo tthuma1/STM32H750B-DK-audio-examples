@@ -155,6 +155,10 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM_D1
 
+  /* inside SECTIONS: */
+  .AXI_SRAM (NOLOAD) : { *(.AXI_SRAM*) } >RAM_D1
+  .D3_SRAM  (NOLOAD) : { *(.D3_SRAM*)  } >RAM_D3
+
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack :
   {
