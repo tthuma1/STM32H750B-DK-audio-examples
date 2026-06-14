@@ -38,12 +38,7 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-typedef enum {
-  AUDIO_ERROR_NONE = 0,
-  AUDIO_ERROR_NOTREADY,
-  AUDIO_ERROR_IO,
-  AUDIO_ERROR_EOF,
-}AUDIO_ErrorTypeDef;
+
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -66,11 +61,11 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
-#define AUDIO_BUFFER_SIZE 2048
-#define SAMPLE_RATE 48000.0f
-#define TONE_FREQ   100.0f
-#define AMPLITUDE   30000     // int16 max is 32767
-#define TWO_PI      6.28318530718f
+#define AUDIO_FREQUENCY           16000U
+/* Number of uint16 elements in the PDM record buffer (two DMA halves) */
+#define AUDIO_IN_PDM_BUFFER_SIZE  (uint32_t)(128U*AUDIO_FREQUENCY/16000U*2U)
+/* Number of uint16 elements in the PCM playback ring buffer */
+#define AUDIO_BUFF_SIZE           4096U
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

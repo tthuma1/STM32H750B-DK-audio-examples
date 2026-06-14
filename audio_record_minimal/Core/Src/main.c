@@ -27,16 +27,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum {
-  BUFFER_OFFSET_NONE = 0,
-  BUFFER_OFFSET_HALF,
-  BUFFER_OFFSET_FULL,
-}BUFFER_StateTypeDef;
 
-typedef struct {
-  uint8_t buff[AUDIO_BUFFER_SIZE];
-  BUFFER_StateTypeDef state;
-}AUDIO_BufferTypeDef;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -54,11 +45,18 @@ typedef struct {
 CRC_HandleTypeDef hcrc;
 
 /* USER CODE BEGIN PV */
-ALIGN_32BYTES (static AUDIO_BufferTypeDef  buffer_ctl);
-BSP_AUDIO_Init_t AudioPlayInit;
+/* PDM record buffer: SAI4 PDM uses BDMA, which can only access D3 SRAM
+   (0x38000000). The .D3_SRAM section is mapped to RAM_D3 in the linker
+   script. NOLOAD section: not zero-initialised at startup. */
+ALIGN_32BYTES (static uint16_t recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE]) __attribute__((section(".D3_SRAM")));
 
-static float phase = 0.0f;
-static float phase_inc = TWO_PI * TONE_FREQ / SAMPLE_RATE;
+/* PCM playback ring buffer, lives in AXI SRAM (DMA2-accessible) */
+ALIGN_32BYTES (static uint16_t RecPlayback[AUDIO_BUFF_SIZE]);
+
+static uint32_t playbackPtr = 0;
+
+BSP_AUDIO_Init_t AudioOutInit;
+BSP_AUDIO_Init_t AudioInInit;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,10 +65,6 @@ static void MPU_Config(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 static void CPU_CACHE_Enable(void);
-
-AUDIO_ErrorTypeDef AUDIO_Start(void);
-uint8_t AUDIO_Process(void);
-void GenerateTone(int16_t *dst, uint32_t samples);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -112,24 +106,48 @@ int main(void)
   MX_CRC_Init();
   MX_PDM2PCM_Init();
   /* USER CODE BEGIN 2 */
-  AudioPlayInit.Device = AUDIO_OUT_DEVICE_HEADPHONE;
-  AudioPlayInit.ChannelsNbr = 2;
-  AudioPlayInit.SampleRate = 96000;
-  AudioPlayInit.BitsPerSample = AUDIO_RESOLUTION_16B;
-  AudioPlayInit.Volume = 40;
+  AudioOutInit.Device = AUDIO_OUT_DEVICE_HEADPHONE;
+  AudioOutInit.ChannelsNbr = 2;
+  AudioOutInit.SampleRate = AUDIO_FREQUENCY;
+  AudioOutInit.BitsPerSample = AUDIO_RESOLUTION_16B;
+  AudioOutInit.Volume = 80;
 
-  if(BSP_AUDIO_OUT_Init(0, &AudioPlayInit) != 0)
+  AudioInInit.Device = AUDIO_IN_DEVICE_DIGITAL_MIC;
+  AudioInInit.ChannelsNbr = 2;
+  AudioInInit.SampleRate = AUDIO_FREQUENCY;
+  AudioInInit.BitsPerSample = AUDIO_RESOLUTION_16B;
+  AudioInInit.Volume = 80;
+
+  /* Instance 1: MEMS microphones via SAI4 PDM interface + BDMA */
+  if (BSP_AUDIO_IN_Init(1, &AudioInInit) != BSP_ERROR_NONE)
   {
+    Error_Handler();
   }
 
-  AUDIO_Start();
+  /* Instance 0: WM8994 codec via SAI2 + DMA2, line out / headphone */
+  if (BSP_AUDIO_OUT_Init(0, &AudioOutInit) != BSP_ERROR_NONE)
+  {
+    Error_Handler();
+  }
+
+  /* Start recording: circular DMA over the whole PDM buffer */
+  if (BSP_AUDIO_IN_RecordPDM(1, (uint8_t *)recordPDMBuf, 2U * AUDIO_IN_PDM_BUFFER_SIZE) != BSP_ERROR_NONE)
+  {
+    Error_Handler();
+  }
+
+  /* Start playback of the PCM ring buffer that record callbacks fill */
+  if (BSP_AUDIO_OUT_Play(0, (uint8_t *)RecPlayback, 2U * AUDIO_BUFF_SIZE) != BSP_ERROR_NONE)
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    AUDIO_Process();
+    /* Audio path runs entirely in DMA interrupts */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -139,6 +157,10 @@ int main(void)
 
 /**
   * @brief System Clock Configuration
+  *        SYSCLK = 400 MHz from PLL1 fed by the 25 MHz HSE.
+  *        The BSP audio driver configures PLL2 for the SAI kernel clock and
+  *        assumes a 25 MHz PLL input (PLL2M = 25), so HSE must be the PLL
+  *        source.
   * @retval None
   */
 void SystemClock_Config(void)
@@ -152,17 +174,27 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
+  RCC_OscInitStruct.CSIState = RCC_CSI_OFF;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 5;
+  RCC_OscInitStruct.PLL.PLLN = 160;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
+  RCC_OscInitStruct.PLL.PLLP = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -173,18 +205,24 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV1;
-  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
+  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }
+
+  /* I/O compensation cell: recommended when buses run at high frequency.
+     Requires the CSI and SYSCFG clocks. */
+  __HAL_RCC_CSI_ENABLE();
+  __HAL_RCC_SYSCFG_CLK_ENABLE();
+  HAL_EnableCompensationCell();
 }
 
 /**
@@ -220,118 +258,77 @@ static void MX_CRC_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-AUDIO_ErrorTypeDef AUDIO_Start(void)
-{
-  buffer_ctl.state = BUFFER_OFFSET_NONE;
-
-  GenerateTone((int16_t *)&buffer_ctl.buff[0],
-               AUDIO_BUFFER_SIZE / 4); // bytes → stereo samples
-
-  SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[0],
-                          AUDIO_BUFFER_SIZE);
-
-  BSP_AUDIO_OUT_Play(0,
-                     (uint8_t *)&buffer_ctl.buff[0],
-                     AUDIO_BUFFER_SIZE);
-
-  return AUDIO_ERROR_NONE;
-}
-
-/**
-  * @brief  Manages Audio process.
-  * @param  None
-  * @retval Audio error
-  */
-uint8_t AUDIO_Process(void)
-{
-  AUDIO_ErrorTypeDef error_state = AUDIO_ERROR_NONE;
-
-  /* 1st half buffer played; so fill it and continue playing from bottom*/
-  if (buffer_ctl.state == BUFFER_OFFSET_HALF)
-  {
-    GenerateTone((int16_t *)&buffer_ctl.buff[0],
-                (AUDIO_BUFFER_SIZE / 2) / 4);
-
-    buffer_ctl.state = BUFFER_OFFSET_NONE;
-    SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[0],
-                            AUDIO_BUFFER_SIZE / 2);
-  }
-
-
-  /* 2nd half buffer played; so fill it and continue playing from top */
-  if (buffer_ctl.state == BUFFER_OFFSET_FULL)
-  {
-    GenerateTone((int16_t *)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2],
-                (AUDIO_BUFFER_SIZE / 2) / 4);
-
-    buffer_ctl.state = BUFFER_OFFSET_NONE;
-    SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2],
-                            AUDIO_BUFFER_SIZE / 2);
-  }
-
-  return (uint8_t) error_state;
-}
-
-
-
 /*------------------------------------------------------------------------------
-       Callbacks implementation:
-           the callbacks API are defined __weak in the stm32769i_discovery_audio.c file
-           and their implementation should be done the user code if they are needed.
-           Below some examples of callback implementations.
+       Audio record callbacks: convert each completed PDM half-buffer to PCM
+       and append it to the playback ring buffer.
   ----------------------------------------------------------------------------*/
+
 /**
-  * @brief  Manages the full Transfer complete event.
-  * @param  None
+  * @brief  Second half of the PDM record buffer is ready.
+  * @param  Instance Audio in instance (1 = digital MEMS microphones)
   * @retval None
   */
-void BSP_AUDIO_OUT_TransferComplete_CallBack(uint32_t Interface)
+void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance)
 {
-  /* allows AUDIO_Process() to refill 2nd part of the buffer  */
-  buffer_ctl.state = BUFFER_OFFSET_FULL;
+  if (Instance == 1U)
+  {
+    /* Invalidate Data Cache to get the updated content of the SRAM */
+    SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
+                                 sizeof(recordPDMBuf) / 2U);
+
+    BSP_AUDIO_IN_PDMToPCM(Instance,
+                          (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
+                          &RecPlayback[playbackPtr]);
+
+    /* Clean Data Cache to update the content of the SRAM */
+    SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
+                            AUDIO_IN_PDM_BUFFER_SIZE / 4U);
+
+    playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
+    if (playbackPtr >= AUDIO_BUFF_SIZE)
+    {
+      playbackPtr = 0;
+    }
+  }
 }
 
 /**
-  * @brief  Manages the DMA Half Transfer complete event.
-  * @param  None
+  * @brief  First half of the PDM record buffer is ready.
+  * @param  Instance Audio in instance (1 = digital MEMS microphones)
   * @retval None
   */
-void BSP_AUDIO_OUT_HalfTransfer_CallBack(uint32_t Interface)
+void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
 {
-  /* allows AUDIO_Process() to refill 1st part of the buffer  */
-  buffer_ctl.state = BUFFER_OFFSET_HALF;
+  if (Instance == 1U)
+  {
+    /* Invalidate Data Cache to get the updated content of the SRAM */
+    SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[0],
+                                 sizeof(recordPDMBuf) / 2U);
+
+    BSP_AUDIO_IN_PDMToPCM(Instance,
+                          (uint16_t *)&recordPDMBuf[0],
+                          &RecPlayback[playbackPtr]);
+
+    /* Clean Data Cache to update the content of the SRAM */
+    SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
+                            AUDIO_IN_PDM_BUFFER_SIZE / 4U);
+
+    playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
+    if (playbackPtr >= AUDIO_BUFF_SIZE)
+    {
+      playbackPtr = 0;
+    }
+  }
 }
 
 /**
   * @brief  Manages the DMA FIFO error event.
-  * @param  None
+  * @param  Instance Audio out instance
   * @retval None
   */
 void BSP_AUDIO_OUT_Error_CallBack(uint32_t Interface)
 {
-  /* Stop the program with an infinite loop */
-  while (BSP_PB_GetState(BUTTON_USER) != RESET)
-  {
-    return;
-  }
-
-  /* could also generate a system reset to recover from the error */
-  /* .... */
-}
-
-void GenerateTone(int16_t *dst, uint32_t samples)
-{
-  for (uint32_t i = 0; i < samples; i++)
-  {
-    int16_t s = (int16_t)(AMPLITUDE * sinf(phase));
-    phase += phase_inc;
-    if (phase >= TWO_PI)
-      phase -= TWO_PI;
-
-    // stereo: L and R
-    dst[2*i]     = s;
-    dst[2*i + 1] = s;
-  }
+  Error_Handler();
 }
 
 /**
