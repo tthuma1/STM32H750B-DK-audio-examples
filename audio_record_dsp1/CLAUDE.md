@@ -33,11 +33,11 @@ mics ─PDM→ SAI4_A ─BDMA Ch1→ recordPDMBuf (D3 SRAM @0x38000000)
 
 ## DSP stage
 
-`DSP_Process` (in `main.c`) edits the PCM in place after
-`BSP_AUDIO_IN_PDMToPCM` in both record callbacks, running three combinable
-effects as a fixed chain **HPF → LPF → reverb** (one-pole RC filters + a
-per-channel feedback delay line). Enable/tune each via the `DSP_*` `#define`s
-in `USER CODE BEGIN PD`; disabled effects (`DSP_ENABLE_*` = 0) compile out.
+`DSP_Process` (in `main.c`) edits the PCM in place, applying four combinable
+effects as a fixed chain **HPF → LPF → reverb → conv**: one-pole RC high/low
+pass, an IIR feedback delay line, and an 8-tap moving-average smoothing FIR
+(`dsp_conv_kernel`). Tune via the `DSP_*` `#define`s in `USER CODE BEGIN PD`;
+disabled effects (`DSP_ENABLE_*` = 0) compile out.
 
 ## Where the logic lives
 
@@ -87,5 +87,3 @@ Flash/debug with ST-LINK via the IDE or the `.launch` config.
   (`MPU_Config`), so the callbacks don't do D-cache maintenance. If you change
   the MPU/region attributes, you must add `SCB_InvalidateDCache_by_Addr` around
   the PDM reads (see commented variants in `nastavitve.md`).
-- After editing in CubeMX, only `USER CODE` blocks survive regeneration — keep
-  app logic inside them.

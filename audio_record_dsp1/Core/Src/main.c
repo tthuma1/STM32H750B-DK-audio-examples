@@ -32,16 +32,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* ---- DSP selection (independent, combinable; chained HPF -> LPF -> reverb) ---- */
+/* ---- DSP selection (independent, combinable; chained HPF -> LPF -> reverb -> conv) ---- */
 #define DSP_ENABLE_HPF      0
 #define DSP_ENABLE_LPF      0
-#define DSP_ENABLE_REVERB   1
+#define DSP_ENABLE_REVERB   0
+#define DSP_ENABLE_CONV     1          /* FIR convolution (single echo) */
 
 /* ---- Tunables ---- */
 #define DSP_HPF_CUTOFF_HZ   5000.0f
 #define DSP_LPF_CUTOFF_HZ   5000.0f
 #define DSP_REVERB_DELAY_MS 80
 #define DSP_REVERB_FEEDBACK 0.40f      /* |g| < 1 for stability */
+#define DSP_CONV_NTAPS      8          /* FIR smoothing: 8-tap moving average */
 
 /* ---- Derived, compile-time-constant one-pole coefficients (RC model) ---- */
 #define DSP_PI       3.14159265358979f
@@ -98,6 +100,15 @@ static void DSP_Process(uint16_t *pcm, uint32_t frames);
 #if DSP_ENABLE_REVERB
   static float reverb_buf[2][DSP_REVERB_DELAY];   /* one delay line per channel */
   static uint32_t reverb_idx[2];
+#endif
+#if DSP_ENABLE_CONV
+  /* 8-tap moving-average (smoothing) FIR kernel: every tap = 1/8.
+     y[n] = sum_k h[k] * x[n-k].  hist[0] = newest input. */
+  static const float dsp_conv_kernel[DSP_CONV_NTAPS] = {
+    0.125f, 0.125f, 0.125f, 0.125f,
+    0.125f, 0.125f, 0.125f, 0.125f,
+  };
+  static float conv_hist[2][DSP_CONV_NTAPS];   /* last NTAPS inputs per channel */
 #endif
 
 /* Clamp a float sample to the signed 16-bit PCM range. */
@@ -351,7 +362,7 @@ void BSP_AUDIO_OUT_Error_CallBack(uint32_t Interface)
 
 /**
   * @brief  Apply the enabled DSP effects in place to a block of interleaved
-  *         stereo 16-bit PCM. Effects are chained HPF -> LPF -> reverb.
+  *         stereo 16-bit PCM. Effects are chained HPF -> LPF -> reverb -> conv.
   * @param  pcm    Pointer to interleaved (L,R,L,R...) PCM, treated as signed.
   * @param  frames Number of stereo frames in the block.
   * @retval None
@@ -380,6 +391,22 @@ static void DSP_Process(uint16_t *pcm, uint32_t frames)
       reverb_buf[ch][reverb_idx[ch]] = out;
       if (++reverb_idx[ch] >= DSP_REVERB_DELAY) reverb_idx[ch] = 0;
       x = out;
+#endif
+#if DSP_ENABLE_CONV
+      /* FIR smoothing: shift newest input into hist[0], then a plain
+         multiply/add loop over the kernel taps. */
+      for (uint32_t t = DSP_CONV_NTAPS - 1; t > 0; t--)
+      {
+        conv_hist[ch][t] = conv_hist[ch][t - 1];
+      }
+      conv_hist[ch][0] = x;
+
+      float acc = 0.0f;
+      for (uint32_t t = 0; t < DSP_CONV_NTAPS; t++)
+      {
+        acc += dsp_conv_kernel[t] * conv_hist[ch][t];
+      }
+      x = acc;
 #endif
       pcm[2 * i + ch] = (uint16_t)(int16_t)dsp_clip(x);
     }
