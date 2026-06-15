@@ -1,9 +1,9 @@
 /**
   ******************************************************************************
-  * @file    camera.h
+  * @file    audio.h
   * @author  MCD Application Team
   * @brief   This header file contains the common defines and functions prototypes
-  *          for the camera driver.
+  *          for the Audio driver.
   ******************************************************************************
   * @attention
   *
@@ -18,8 +18,8 @@
   */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef CAMERA_H
-#define CAMERA_H
+#ifndef AUDIO_H
+#define AUDIO_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,51 +36,50 @@ extern "C" {
   * @{
   */
 
-/** @addtogroup CAMERA
+/** @addtogroup AUDIO
   * @{
   */
 
-
-/** @defgroup CAMERA_Exported_Types
+/** @defgroup AUDIO_Exported_Constants
   * @{
   */
+
 /**
   * @}
   */
 
-/** @defgroup CAMERA_Driver_structure  Camera Driver structure
+/** @defgroup AUDIO_Exported_Types
+  * @{
+  */
+
+
+
+/** @defgroup AUDIO_Driver_structure  Audio Driver structure
   * @{
   */
 typedef struct
 {
-  int32_t (*Init)(void *, uint32_t, uint32_t);
+  int32_t (*Init)(void *, void *);
   int32_t (*DeInit)(void *);
   int32_t (*ReadID)(void *, uint32_t *);
-  int32_t (*GetCapabilities)(void *, void *);
-  int32_t (*SetLightMode)(void *, uint32_t);
-  int32_t (*SetColorEffect)(void *, uint32_t);
-  int32_t (*SetBrightness)(void *, int32_t);
-  int32_t (*SetSaturation)(void *, int32_t);
-  int32_t (*SetContrast)(void *, int32_t);
-  int32_t (*SetHueDegree)(void *, int32_t);
-  int32_t (*MirrorFlipConfig)(void *, uint32_t);
-  int32_t (*ZoomConfig)(void *, uint32_t);
+  int32_t (*Play)(void *);
+  int32_t (*Pause)(void *);
+  int32_t (*Resume)(void *);
+  int32_t (*Stop)(void *, uint32_t);
+  int32_t (*SetFrequency)(void *, uint32_t);
+  int32_t (*GetFrequency)(void *);
+  int32_t (*SetVolume)(void *, uint32_t, uint8_t);
+  int32_t (*GetVolume)(void *, uint32_t, uint8_t *);
+  int32_t (*SetMute)(void *, uint32_t);
+  int32_t (*SetOutputMode)(void *, uint32_t);
   int32_t (*SetResolution)(void *, uint32_t);
   int32_t (*GetResolution)(void *, uint32_t *);
-  int32_t (*SetPixelFormat)(void *, uint32_t);
-  int32_t (*GetPixelFormat)(void *, uint32_t *);
-  int32_t (*NightModeConfig)(void *, uint32_t);
-  int32_t (*SetFrequency)(void *, int32_t);
-  int32_t (*SetGain)(void *, int32_t);
-  int32_t (*SetExposure)(void *, int32_t);
-} CAMERA_Drv_t;
-
+  int32_t (*SetProtocol)(void *, uint32_t);
+  int32_t (*GetProtocol)(void *, uint32_t *);
+  int32_t (*Reset)(void *);
+} AUDIO_Drv_t;
 /**
   * @}
-  */
-
-/** @defgroup CAMERA_Exported_Constants
-  * @{
   */
 
 /**
@@ -103,4 +102,4 @@ typedef struct
 }
 #endif
 
-#endif /* CAMERA_H */
+#endif /* AUDIO_H */

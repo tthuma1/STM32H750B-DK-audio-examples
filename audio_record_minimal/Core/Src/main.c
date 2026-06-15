@@ -80,7 +80,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  CPU_CACHE_Enable();
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -92,7 +92,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-  CPU_CACHE_Enable();
   /* USER CODE END Init */
 
   /* Configure the system clock */
