@@ -48,10 +48,10 @@ CRC_HandleTypeDef hcrc;
 /* PDM record buffer: SAI4 PDM uses BDMA, which can only access D3 SRAM
    (0x38000000). The .D3_SRAM section is mapped to RAM_D3 in the linker
    script. NOLOAD section: not zero-initialised at startup. */
-ALIGN_32BYTES (static uint16_t recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE]) __attribute__((section(".D3_SRAM")));
+static uint16_t recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE] __attribute__((section(".D3_SRAM")));
 
 /* PCM playback ring buffer, lives in AXI SRAM (DMA2-accessible) */
-ALIGN_32BYTES (static uint16_t RecPlayback[AUDIO_BUFF_SIZE]);
+static uint16_t RecPlayback[AUDIO_BUFF_SIZE];
 
 static uint32_t playbackPtr = 0;
 
@@ -62,9 +62,9 @@ BSP_AUDIO_Init_t AudioInInit;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
+static void MX_GPIO_Init(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
-static void CPU_CACHE_Enable(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -80,7 +80,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  CPU_CACHE_Enable();
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -92,6 +91,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -102,6 +102,7 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
+  MX_GPIO_Init();
   MX_CRC_Init();
   MX_PDM2PCM_Init();
   /* USER CODE BEGIN 2 */
@@ -146,7 +147,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* Audio path runs entirely in DMA interrupts */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -156,10 +156,6 @@ int main(void)
 
 /**
   * @brief System Clock Configuration
-  *        SYSCLK = 400 MHz from PLL1 fed by the 25 MHz HSE.
-  *        The BSP audio driver configures PLL2 for the SAI kernel clock and
-  *        assumes a 25 MHz PLL input (PLL2M = 25), so HSE must be the PLL
-  *        source.
   * @retval None
   */
 void SystemClock_Config(void)
@@ -173,27 +169,17 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
-  RCC_OscInitStruct.CSIState = RCC_CSI_OFF;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 5;
-  RCC_OscInitStruct.PLL.PLLN = 160;
-  RCC_OscInitStruct.PLL.PLLFRACN = 0;
-  RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLR = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
-  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
-  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_2;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -204,24 +190,18 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
-  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV1;
+  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
-
-  /* I/O compensation cell: recommended when buses run at high frequency.
-     Requires the CSI and SYSCFG clocks. */
-  __HAL_RCC_CSI_ENABLE();
-  __HAL_RCC_SYSCFG_CLK_ENABLE();
-  HAL_EnableCompensationCell();
 }
 
 /**
@@ -256,12 +236,26 @@ static void MX_CRC_Init(void)
 
 }
 
-/* USER CODE BEGIN 4 */
-/*------------------------------------------------------------------------------
-       Audio record callbacks: convert each completed PDM half-buffer to PCM
-       and append it to the playback ring buffer.
-  ----------------------------------------------------------------------------*/
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
 
+  /* USER CODE END MX_GPIO_Init_1 */
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOH_CLK_ENABLE();
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
+}
+
+/* USER CODE BEGIN 4 */
 /**
   * @brief  Second half of the PDM record buffer is ready.
   * @param  Instance Audio in instance (1 = digital MEMS microphones)
@@ -271,17 +265,9 @@ void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance)
 {
   if (Instance == 1U)
   {
-    /* Invalidate Data Cache to get the updated content of the SRAM */
-    SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
-                                 sizeof(recordPDMBuf) / 2U);
-
     BSP_AUDIO_IN_PDMToPCM(Instance,
                           (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
                           &RecPlayback[playbackPtr]);
-
-    /* Clean Data Cache to update the content of the SRAM */
-    SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
-                            AUDIO_IN_PDM_BUFFER_SIZE / 4U);
 
     playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
     if (playbackPtr >= AUDIO_BUFF_SIZE)
@@ -300,17 +286,9 @@ void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
 {
   if (Instance == 1U)
   {
-    /* Invalidate Data Cache to get the updated content of the SRAM */
-    SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[0],
-                                 sizeof(recordPDMBuf) / 2U);
-
     BSP_AUDIO_IN_PDMToPCM(Instance,
                           (uint16_t *)&recordPDMBuf[0],
                           &RecPlayback[playbackPtr]);
-
-    /* Clean Data Cache to update the content of the SRAM */
-    SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
-                            AUDIO_IN_PDM_BUFFER_SIZE / 4U);
 
     playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
     if (playbackPtr >= AUDIO_BUFF_SIZE)
@@ -329,21 +307,6 @@ void BSP_AUDIO_OUT_Error_CallBack(uint32_t Interface)
 {
   Error_Handler();
 }
-
-/**
-  * @brief  CPU L1-Cache enable.
-  * @param  None
-  * @retval None
-  */
-static void CPU_CACHE_Enable(void)
-{
-  /* Enable I-Cache */
-  SCB_EnableICache();
-
-  /* Enable D-Cache */
-  SCB_EnableDCache();
-}
-
 /* USER CODE END 4 */
 
  /* MPU Configuration */
