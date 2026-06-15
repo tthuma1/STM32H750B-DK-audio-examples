@@ -40,7 +40,7 @@
 /* ---- Tunables ---- */
 #define DSP_HPF_CUTOFF_HZ   5000.0f
 #define DSP_LPF_CUTOFF_HZ   5000.0f
-#define DSP_REVERB_DELAY_MS 80.0f
+#define DSP_REVERB_DELAY_MS 80
 #define DSP_REVERB_FEEDBACK 0.40f      /* |g| < 1 for stability */
 
 /* ---- Derived, compile-time-constant one-pole coefficients (RC model) ---- */
@@ -50,7 +50,7 @@
 #define DSP_LPF_A    (DSP_DT / (DSP_LPF_RC + DSP_DT))            /* low-pass alpha */
 #define DSP_HPF_RC   (1.0f / (2.0f * DSP_PI * DSP_HPF_CUTOFF_HZ))
 #define DSP_HPF_A    (DSP_HPF_RC / (DSP_HPF_RC + DSP_DT))        /* high-pass alpha */
-#define DSP_REVERB_DELAY  ((uint32_t)(DSP_REVERB_DELAY_MS * 0.001f * AUDIO_FREQUENCY))
+#define DSP_REVERB_DELAY  (DSP_REVERB_DELAY_MS * AUDIO_FREQUENCY / 1000)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -83,20 +83,21 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
+static void DSP_Process(uint16_t *pcm, uint32_t frames);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 /* --- Per-channel DSP state (index 0 = L, 1 = R), zero-initialised --- */
 #if DSP_ENABLE_HPF
-static float hpf_x1[2], hpf_y1[2];              /* prev input, prev output */
+  static float hpf_x1[2], hpf_y1[2];              /* prev input, prev output */
 #endif
 #if DSP_ENABLE_LPF
-static float lpf_y1[2];                         /* prev output */
+  static float lpf_y1[2];                         /* prev output */
 #endif
 #if DSP_ENABLE_REVERB
-static float reverb_buf[2][DSP_REVERB_DELAY];   /* one delay line per channel */
-static uint32_t reverb_idx[2];
+  static float reverb_buf[2][DSP_REVERB_DELAY];   /* one delay line per channel */
+  static uint32_t reverb_idx[2];
 #endif
 
 /* Clamp a float sample to the signed 16-bit PCM range. */
@@ -105,43 +106,6 @@ static inline float dsp_clip(float v)
   if (v >  32767.0f) return  32767.0f;
   if (v < -32768.0f) return -32768.0f;
   return v;
-}
-
-/**
-  * @brief  Apply the enabled DSP effects in place to a block of interleaved
-  *         stereo 16-bit PCM. Effects are chained HPF -> LPF -> reverb.
-  * @param  pcm    Pointer to interleaved (L,R,L,R...) PCM, treated as signed.
-  * @param  frames Number of stereo frames in the block.
-  * @retval None
-  */
-static void DSP_Process(uint16_t *pcm, uint32_t frames)
-{
-  for (uint32_t i = 0; i < frames; i++)
-  {
-    for (uint32_t ch = 0; ch < 2; ch++)
-    {
-      float x = (float)(int16_t)pcm[2 * i + ch];   /* interpret as signed PCM */
-
-#if DSP_ENABLE_HPF
-      float y = DSP_HPF_A * (hpf_y1[ch] + x - hpf_x1[ch]);
-      hpf_x1[ch] = x;
-      hpf_y1[ch] = y;
-      x = y;
-#endif
-#if DSP_ENABLE_LPF
-      lpf_y1[ch] += DSP_LPF_A * (x - lpf_y1[ch]);
-      x = lpf_y1[ch];
-#endif
-#if DSP_ENABLE_REVERB
-      float d = reverb_buf[ch][reverb_idx[ch]];
-      float out = x + DSP_REVERB_FEEDBACK * d;       /* y[n] = x[n] + g*y[n-D] */
-      reverb_buf[ch][reverb_idx[ch]] = out;
-      if (++reverb_idx[ch] >= DSP_REVERB_DELAY) reverb_idx[ch] = 0;
-      x = out;
-#endif
-      pcm[2 * i + ch] = (uint16_t)(int16_t)dsp_clip(x);
-    }
-  }
 }
 /* USER CODE END 0 */
 
@@ -383,6 +347,43 @@ void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
 void BSP_AUDIO_OUT_Error_CallBack(uint32_t Interface)
 {
   Error_Handler();
+}
+
+/**
+  * @brief  Apply the enabled DSP effects in place to a block of interleaved
+  *         stereo 16-bit PCM. Effects are chained HPF -> LPF -> reverb.
+  * @param  pcm    Pointer to interleaved (L,R,L,R...) PCM, treated as signed.
+  * @param  frames Number of stereo frames in the block.
+  * @retval None
+  */
+static void DSP_Process(uint16_t *pcm, uint32_t frames)
+{
+  for (uint32_t i = 0; i < frames; i++)
+  {
+    for (uint32_t ch = 0; ch < 2; ch++)
+    {
+      float x = (float)(int16_t)pcm[2 * i + ch];   /* interpret as signed PCM */
+
+#if DSP_ENABLE_HPF
+      float y = DSP_HPF_A * (hpf_y1[ch] + x - hpf_x1[ch]);
+      hpf_x1[ch] = x;
+      hpf_y1[ch] = y;
+      x = y;
+#endif
+#if DSP_ENABLE_LPF
+      lpf_y1[ch] += DSP_LPF_A * (x - lpf_y1[ch]);
+      x = lpf_y1[ch];
+#endif
+#if DSP_ENABLE_REVERB
+      float d = reverb_buf[ch][reverb_idx[ch]];
+      float out = x + DSP_REVERB_FEEDBACK * d;       /* y[n] = x[n] + g*y[n-D] */
+      reverb_buf[ch][reverb_idx[ch]] = out;
+      if (++reverb_idx[ch] >= DSP_REVERB_DELAY) reverb_idx[ch] = 0;
+      x = out;
+#endif
+      pcm[2 * i + ch] = (uint16_t)(int16_t)dsp_clip(x);
+    }
+  }
 }
 /* USER CODE END 4 */
 
