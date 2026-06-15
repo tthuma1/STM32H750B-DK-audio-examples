@@ -4,15 +4,16 @@
 
 Bare-metal STM32 audio loopback demo on the **STM32H750B-DK** board
 (STM32H750XBH6 MPU, Cortex-M7). It captures two-channel (stereo) PDM audio
-from the on-board MEMS microphone (IMP34DT05TR, wired as a stereo PDM pair)
-and plays it back in real time through the green line-out jack via the WM8994
-codec. CubeMX-generated HAL project, built with STM32CubeIDE.
+from the on-board MEMS microphone (IMP34DT05TR, wired as a stereo PDM pair),
+runs a configurable software DSP stage (high-pass / low-pass / reverb) on the
+PCM, and plays it back in real time through the green line-out jack via the
+WM8994 codec. CubeMX-generated HAL project, built with STM32CubeIDE.
 
 ## Data path
 
 ```
 mics ─PDM→ SAI4_A ─BDMA Ch1→ recordPDMBuf (D3 SRAM @0x38000000)
-   ─[BDMA IRQ: CPU BSP_AUDIO_IN_PDMToPCM]→ RecPlayback ring (AXI SRAM, D1)
+   ─[BDMA IRQ: CPU BSP_AUDIO_IN_PDMToPCM → DSP_Process]→ RecPlayback ring (AXI SRAM, D1)
    ─DMA2_Stream1 (circular)→ SAI2_A ─I2S→ WM8994 ─→ line-out   (WM8994 ctrl via I2C4)
 ```
 
@@ -24,16 +25,27 @@ mics ─PDM→ SAI4_A ─BDMA Ch1→ recordPDMBuf (D3 SRAM @0x38000000)
   (`BSP_AUDIO_IN_HalfTransfer_CallBack` / `..._TransferComplete_CallBack`).
   One PDM filter runs per channel and produces interleaved stereo PCM, written
   into `RecPlayback` at `playbackPtr`.
+- **DSP:** each callback then calls `DSP_Process` on the freshly written block,
+  modifying the PCM in place (see "DSP stage" below).
 - **Audio out (instance 0):** WM8994 over SAI2_A + DMA2_Stream1, circular over
   `RecPlayback`, 2 channels. Configured/controlled over I2C4.
 - Config: 16 kHz, 16-bit, stereo (`AUDIO_FREQUENCY`, sizes in `Core/Inc/main.h`).
+
+## DSP stage
+
+`DSP_Process` (in `main.c`) edits the PCM in place after
+`BSP_AUDIO_IN_PDMToPCM` in both record callbacks, running three combinable
+effects as a fixed chain **HPF → LPF → reverb** (one-pole RC filters + a
+per-channel feedback delay line). Enable/tune each via the `DSP_*` `#define`s
+in `USER CODE BEGIN PD`; disabled effects (`DSP_ENABLE_*` = 0) compile out.
 
 ## Where the logic lives
 
 All application code is in the CubeMX `USER CODE` blocks of:
 
-- **`Core/Src/main.c`** — init, buffer declarations, the two record callbacks
-  (the actual loopback logic), `MPU_Config`, clock config.
+- **`Core/Src/main.c`** — init, buffer declarations, the DSP stage
+  (`DSP_Process` + its `#define` config and per-channel state), the two record
+  callbacks (the actual loopback logic), `MPU_Config`, clock config.
 - **`Core/Inc/main.h`** — `AUDIO_FREQUENCY`, `AUDIO_IN_PDM_BUFFER_SIZE`,
   `AUDIO_BUFF_SIZE`.
 
