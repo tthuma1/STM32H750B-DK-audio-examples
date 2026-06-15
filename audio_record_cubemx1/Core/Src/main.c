@@ -45,7 +45,18 @@
 CRC_HandleTypeDef hcrc;
 
 /* USER CODE BEGIN PV */
+/* PDM record buffer: SAI4 PDM uses BDMA, which can only access D3 SRAM
+   (0x38000000). The .D3_SRAM section is mapped to RAM_D3 in the linker
+   script. NOLOAD section: not zero-initialised at startup. */
+ALIGN_32BYTES (static uint16_t recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE]) __attribute__((section(".D3_SRAM")));
 
+/* PCM playback ring buffer, lives in AXI SRAM (DMA2-accessible) */
+ALIGN_32BYTES (static uint16_t RecPlayback[AUDIO_BUFF_SIZE]);
+
+static uint32_t playbackPtr = 0;
+
+BSP_AUDIO_Init_t AudioOutInit;
+BSP_AUDIO_Init_t AudioInInit;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -54,7 +65,6 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
-static void CPU_CACHE_Enable(void)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -70,7 +80,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  CPU_CACHE_Enable();
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -248,17 +257,55 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /**
-  * @brief  CPU L1-Cache enable.
-  * @param  None
+  * @brief  Second half of the PDM record buffer is ready.
+  * @param  Instance Audio in instance (1 = digital MEMS microphones)
   * @retval None
   */
-static void CPU_CACHE_Enable(void)
+void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance)
 {
-  /* Enable I-Cache */
-  SCB_EnableICache();
+  if (Instance == 1U)
+  {
+    BSP_AUDIO_IN_PDMToPCM(Instance,
+                          (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
+                          &RecPlayback[playbackPtr]);
 
-  /* Enable D-Cache */
-  SCB_EnableDCache();
+    playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
+    if (playbackPtr >= AUDIO_BUFF_SIZE)
+    {
+      playbackPtr = 0;
+    }
+  }
+}
+
+/**
+  * @brief  First half of the PDM record buffer is ready.
+  * @param  Instance Audio in instance (1 = digital MEMS microphones)
+  * @retval None
+  */
+void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
+{
+  if (Instance == 1U)
+  {
+    BSP_AUDIO_IN_PDMToPCM(Instance,
+                          (uint16_t *)&recordPDMBuf[0],
+                          &RecPlayback[playbackPtr]);
+
+    playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
+    if (playbackPtr >= AUDIO_BUFF_SIZE)
+    {
+      playbackPtr = 0;
+    }
+  }
+}
+
+/**
+  * @brief  Manages the DMA FIFO error event.
+  * @param  Instance Audio out instance
+  * @retval None
+  */
+void BSP_AUDIO_OUT_Error_CallBack(uint32_t Interface)
+{
+  Error_Handler();
 }
 /* USER CODE END 4 */
 

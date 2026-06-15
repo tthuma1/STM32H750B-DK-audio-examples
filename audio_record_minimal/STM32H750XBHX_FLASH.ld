@@ -156,7 +156,6 @@ SECTIONS
   } >RAM_D1
 
   /* inside SECTIONS: */
-  .AXI_SRAM (NOLOAD) : { *(.AXI_SRAM*) } >RAM_D1
   .D3_SRAM  (NOLOAD) : { *(.D3_SRAM*)  } >RAM_D3
 
   /* User_heap_stack section, used to check that there is enough RAM left */
