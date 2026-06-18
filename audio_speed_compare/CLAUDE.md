@@ -67,6 +67,8 @@ Debug/                          STM32CubeIDE build output (makefile + artifacts)
 Default build links against `STM32H750XBHX_FLASH.ld` (runs from internal flash).
 Flash/debug with ST-LINK via the IDE or the `.launch` config.
 
+Don't try to build the project after you are done with implementation.
+
 ## Gotchas
 
 - **D3 SRAM is mandatory for the PDM buffer.** BDMA (the only DMA the SAI4

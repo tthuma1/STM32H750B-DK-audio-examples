@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+extern SAI_HandleTypeDef haudio_in_sai;   /* defined in stm32h750b_discovery_audio.c */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +57,15 @@ static uint32_t playbackPtr = 0;
 
 BSP_AUDIO_Init_t AudioOutInit;
 BSP_AUDIO_Init_t AudioInInit;
+
+uint32_t g_work_cycles = 0; /* DWT cycles the CPU spent busy per block (transfer + PDM→PCM) */
+uint32_t s_work_start = 0; /* DWT stamp at start of each block's CPU work */
+#if SAI_RX_MODE == SAI_RX_MODE_IT
+uint32_t s_it_acc    = 0; /* accumulated CPU cycles across all FIFO ISRs for this block */
+uint32_t s_isr_entry = 0; /* DWT stamp at entry of the current SAI4_IRQHandler call */
+#elif SAI_RX_MODE == SAI_RX_MODE_DMA
+static uint32_t s_half_cycles = 0; /* CPU cycles spent in the half-transfer callback */
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -105,6 +114,11 @@ int main(void)
   MX_CRC_Init();
   MX_PDM2PCM_Init();
   /* USER CODE BEGIN 2 */
+  /* Enable DWT cycle counter for g_work_cycles measurements */
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+
   AudioOutInit.Device = AUDIO_OUT_DEVICE_HEADPHONE;
   AudioOutInit.ChannelsNbr = 2;
   AudioOutInit.SampleRate = AUDIO_FREQUENCY;
@@ -129,11 +143,23 @@ int main(void)
     Error_Handler();
   }
 
-  /* Start recording: circular DMA over the whole PDM buffer */
+  /* Start recording — method selected by SAI_RX_MODE */
+#if SAI_RX_MODE == SAI_RX_MODE_DMA
   if (BSP_AUDIO_IN_RecordPDM(1, (uint8_t *)recordPDMBuf, 2U * AUDIO_IN_PDM_BUFFER_SIZE) != BSP_ERROR_NONE)
   {
     Error_Handler();
   }
+#elif SAI_RX_MODE == SAI_RX_MODE_IT
+  HAL_NVIC_SetPriority(SAI4_IRQn, BSP_AUDIO_IN_IT_PRIORITY, 0);
+  HAL_NVIC_EnableIRQ(SAI4_IRQn);
+  if (HAL_SAI_Receive_IT(&haudio_in_sai, (uint8_t *)recordPDMBuf,
+                         AUDIO_IN_PDM_BUFFER_SIZE / 2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+#elif SAI_RX_MODE == SAI_RX_MODE_POLLING
+  /* polling is driven from the main while(1) loop below */
+#endif
 
   /* Start playback of the PCM ring buffer that record callbacks fill */
   if (BSP_AUDIO_OUT_Play(0, (uint8_t *)RecPlayback, 2U * AUDIO_BUFF_SIZE) != BSP_ERROR_NONE)
@@ -146,7 +172,23 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* Audio path runs entirely in DMA interrupts */
+#if SAI_RX_MODE == SAI_RX_MODE_POLLING
+    s_work_start = DWT->CYCCNT;
+    if (HAL_SAI_Receive(&haudio_in_sai, (uint8_t *)recordPDMBuf,
+                        AUDIO_IN_PDM_BUFFER_SIZE / 2, HAL_MAX_DELAY) == HAL_OK)
+    {
+      BSP_AUDIO_IN_PDMToPCM(1, (uint16_t *)&recordPDMBuf[0],
+                            &RecPlayback[playbackPtr]);
+
+      SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
+                              AUDIO_IN_PDM_BUFFER_SIZE / 4U);
+
+      playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
+      if (playbackPtr >= AUDIO_BUFF_SIZE) playbackPtr = 0;
+
+      g_work_cycles = DWT->CYCCNT - s_work_start;
+    }
+#endif /* SAI_RX_MODE_POLLING */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -271,23 +313,48 @@ void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance)
 {
   if (Instance == 1U)
   {
-    /* Invalidate Data Cache to get the updated content of the SRAM */
-    SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
-                                 sizeof(recordPDMBuf) / 2U);
+#if SAI_RX_MODE == SAI_RX_MODE_DMA
+    /* DMA: stamp here — BDMA filled the buffer, CPU work starts now */
+    s_work_start = DWT->CYCCNT;
+#endif
 
-    BSP_AUDIO_IN_PDMToPCM(Instance,
-                          (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U],
-                          &RecPlayback[playbackPtr]);
+#if SAI_RX_MODE == SAI_RX_MODE_IT
+    /* IT ping-pong: alternate between the two half-buffers */
+    static uint8_t it_phase = 0;
+    uint16_t *pdm_src = (it_phase == 0)
+                        ? (uint16_t *)&recordPDMBuf[0]
+                        : (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2];
+#else
+    /* DMA complete callback = second half is ready */
+    uint16_t *pdm_src = (uint16_t *)&recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2U];
+    SCB_InvalidateDCache_by_Addr((uint32_t *)pdm_src, sizeof(recordPDMBuf) / 2U);
+#endif
 
-    /* Clean Data Cache to update the content of the SRAM */
+    BSP_AUDIO_IN_PDMToPCM(Instance, pdm_src, &RecPlayback[playbackPtr]);
+
     SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
                             AUDIO_IN_PDM_BUFFER_SIZE / 4U);
 
     playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
-    if (playbackPtr >= AUDIO_BUFF_SIZE)
-    {
-      playbackPtr = 0;
-    }
+    if (playbackPtr >= AUDIO_BUFF_SIZE) playbackPtr = 0;
+
+#if SAI_RX_MODE == SAI_RX_MODE_IT
+    /* s_it_acc = CPU time in ISRs 1..N-1; s_isr_entry = entry of the last ISR.
+       Together they give total CPU-active time excluding idle gaps. */
+    g_work_cycles = s_it_acc + (DWT->CYCCNT - s_isr_entry);
+#elif SAI_RX_MODE == SAI_RX_MODE_DMA
+    /* Sum half + complete callback work so g_work_cycles reflects the full block */
+    g_work_cycles = s_half_cycles + (DWT->CYCCNT - s_work_start);
+#endif
+
+#if SAI_RX_MODE == SAI_RX_MODE_IT
+    it_phase ^= 1;
+    uint16_t *next_buf = (it_phase == 0)
+                         ? &recordPDMBuf[0]
+                         : &recordPDMBuf[AUDIO_IN_PDM_BUFFER_SIZE / 2];
+    HAL_SAI_Receive_IT(&haudio_in_sai, (uint8_t *)next_buf,
+                       AUDIO_IN_PDM_BUFFER_SIZE / 2);
+#endif
   }
 }
 
@@ -298,9 +365,11 @@ void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance)
   */
 void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
 {
+#if SAI_RX_MODE == SAI_RX_MODE_DMA
   if (Instance == 1U)
   {
-    /* Invalidate Data Cache to get the updated content of the SRAM */
+    s_work_start = DWT->CYCCNT;
+
     SCB_InvalidateDCache_by_Addr((uint32_t *)&recordPDMBuf[0],
                                  sizeof(recordPDMBuf) / 2U);
 
@@ -308,16 +377,15 @@ void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance)
                           (uint16_t *)&recordPDMBuf[0],
                           &RecPlayback[playbackPtr]);
 
-    /* Clean Data Cache to update the content of the SRAM */
     SCB_CleanDCache_by_Addr((uint32_t *)&RecPlayback[playbackPtr],
                             AUDIO_IN_PDM_BUFFER_SIZE / 4U);
 
     playbackPtr += AUDIO_IN_PDM_BUFFER_SIZE / 4U / 2U;
-    if (playbackPtr >= AUDIO_BUFF_SIZE)
-    {
-      playbackPtr = 0;
-    }
+    if (playbackPtr >= AUDIO_BUFF_SIZE) playbackPtr = 0;
+
+    s_half_cycles = DWT->CYCCNT - s_work_start;
   }
+#endif /* SAI_RX_MODE_DMA */
 }
 
 /**
