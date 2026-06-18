@@ -31,7 +31,7 @@ extern "C" {
 
 /* ---- Tunables ---- */
 #define DSP_HPF_CUTOFF_HZ   5000.0f
-#define DSP_LPF_CUTOFF_HZ   5000.0f
+#define DSP_LPF_CUTOFF_HZ   3000.0f
 #define DSP_REVERB_DELAY_MS 80
 #define DSP_REVERB_FEEDBACK 0.40f      /* |g| < 1 for stability */
 #define DSP_CONV_NTAPS      8          /* FIR smoothing: 8-tap moving average */

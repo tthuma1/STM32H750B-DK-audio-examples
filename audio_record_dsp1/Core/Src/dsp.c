@@ -29,6 +29,11 @@
 #define DSP_HPF_K    tanf(DSP_PI * DSP_HPF_CUTOFF_HZ / (float)AUDIO_FREQUENCY)
 #define DSP_HPF_B0   (1.0f / (1.0f + DSP_HPF_K))
 #define DSP_HPF_A1   ((DSP_HPF_K - 1.0f) / (DSP_HPF_K + 1.0f))
+/* 4th-order Butterworth = cascade of two 2nd-order sections. The two sections
+   share the cutoff but use different pole-pair damping factors d = 1/Q:
+     d_k = 2·sin((2k-1)·π/(2N)),  N = 4  →  d0 = 2·sin(π/8), d1 = 2·sin(3π/8). */
+#define DSP_BUTTER4_D0    0.76536686f
+#define DSP_BUTTER4_D1    1.84775907f
 #define DSP_REVERB_DELAY  (DSP_REVERB_DELAY_MS * AUDIO_FREQUENCY / 1000)
 /* RIR length in taps (compile-time constant: ms * fs / 1000) */
 #define DSP_RIR_NTAPS     (DSP_RIR_LEN_MS * AUDIO_FREQUENCY / 1000)
@@ -90,16 +95,17 @@ volatile uint32_t bench_cmsis_cycles;
 
 /* --- CMSIS-DSP instances, state, and intermediate buffers --- */
 #if DSP_USE_CMSIS
-  /* Biquad state: 4 words per stage (x[n-1], x[n-2], y[n-1], y[n-2]) */
+  /* 4th-order Butterworth = 2 biquad stages. Biquad state: 4 words per stage
+     (x[n-1], x[n-2], y[n-1], y[n-2]); coeffs: 5 per stage (b0,b1,b2,a1,a2). */
   #if DSP_ENABLE_HPF
     static arm_biquad_casd_df1_inst_f32 cmsis_hpf[2];
-    static float32_t cmsis_hpf_state[2][4];
-    static float32_t cmsis_hpf_coeffs[5];   /* filled by DSP_CMSIS_Init */
+    static float32_t cmsis_hpf_state[2][8];
+    static float32_t cmsis_hpf_coeffs[10];  /* filled by DSP_CMSIS_Init */
   #endif
   #if DSP_ENABLE_LPF
     static arm_biquad_casd_df1_inst_f32 cmsis_lpf[2];
-    static float32_t cmsis_lpf_state[2][4];
-    static float32_t cmsis_lpf_coeffs[5];
+    static float32_t cmsis_lpf_state[2][8];
+    static float32_t cmsis_lpf_coeffs[10];
   #endif
   #if DSP_ENABLE_CONV
     static arm_fir_instance_f32 cmsis_fir[2];
@@ -170,13 +176,13 @@ void DSP_Process(uint16_t *pcm, uint32_t frames)
 #endif
 
 #if DSP_ENABLE_HPF
-  /* 2nd-order Butterworth HPF, in-place (bilinear-transform biquad). */
+  /* 4th-order Butterworth HPF, in-place (cascaded bilinear-transform biquads). */
   arm_biquad_cascade_df1_f32(&cmsis_hpf[0], cmsis_buf_L, cmsis_buf_L, frames);
   arm_biquad_cascade_df1_f32(&cmsis_hpf[1], cmsis_buf_R, cmsis_buf_R, frames);
 #endif
 
 #if DSP_ENABLE_LPF
-  /* 2nd-order Butterworth LPF, in-place (bilinear-transform biquad). */
+  /* 4th-order Butterworth LPF, in-place (cascaded bilinear-transform biquads). */
   arm_biquad_cascade_df1_f32(&cmsis_lpf[0], cmsis_buf_L, cmsis_buf_L, frames);
   arm_biquad_cascade_df1_f32(&cmsis_lpf[1], cmsis_buf_R, cmsis_buf_R, frames);
 #endif
@@ -368,39 +374,50 @@ void DSP_CMSIS_Init(void)
      CMSIS DF1 sign convention: a1, a2 are the POSITIVE feedback coefficients
      (y[n] = b0*x[n]+b1*x[n-1]+b2*x[n-2] + a1*y[n-1]+a2*y[n-2]).  */
 #if DSP_ENABLE_HPF
-  /* 2nd-order Butterworth HPF via bilinear transform.
-     K = tan(π·fc/fs);  norm = 1 + √2·K + K²
-     b0 =  1/norm, b1 = -2/norm, b2 = 1/norm
-     a1_std = 2(K²-1)/norm → CMSIS a1 = -a1_std
-     a2_std = (1-√2·K+K²)/norm → CMSIS a2 = -a2_std */
+  /* 4th-order Butterworth HPF = two cascaded 2nd-order sections via bilinear
+     transform. Both sections share the cutoff but use the Butterworth pole-pair
+     damping d = 1/Q (DSP_BUTTER4_D0/_D1):
+       K = tan(π·fc/fs);  norm = 1 + d·K + K²
+       b0 =  1/norm, b1 = -2/norm, b2 = 1/norm
+       a1_std = 2(K²-1)/norm → CMSIS a1 = -a1_std
+       a2_std = (1-d·K+K²)/norm → CMSIS a2 = -a2_std */
   {
-    float32_t K    = tanf(DSP_PI * DSP_HPF_CUTOFF_HZ / (float32_t)AUDIO_FREQUENCY);
-    float32_t K2   = K * K;
-    float32_t norm = 1.0f + 1.41421356f * K + K2;
-    cmsis_hpf_coeffs[0] =  1.0f / norm;
-    cmsis_hpf_coeffs[1] = -2.0f / norm;
-    cmsis_hpf_coeffs[2] =  1.0f / norm;
-    cmsis_hpf_coeffs[3] =  2.0f * (1.0f - K2) / norm;
-    cmsis_hpf_coeffs[4] = -(1.0f - 1.41421356f * K + K2) / norm;
+    static const float32_t d[2] = { DSP_BUTTER4_D0, DSP_BUTTER4_D1 };
+    float32_t K  = tanf(DSP_PI * DSP_HPF_CUTOFF_HZ / (float32_t)AUDIO_FREQUENCY);
+    float32_t K2 = K * K;
+    for (uint32_t s = 0; s < 2; s++)
+    {
+      float32_t norm = 1.0f + d[s] * K + K2;
+      cmsis_hpf_coeffs[5 * s + 0] =  1.0f / norm;
+      cmsis_hpf_coeffs[5 * s + 1] = -2.0f / norm;
+      cmsis_hpf_coeffs[5 * s + 2] =  1.0f / norm;
+      cmsis_hpf_coeffs[5 * s + 3] =  2.0f * (1.0f - K2) / norm;
+      cmsis_hpf_coeffs[5 * s + 4] = -(1.0f - d[s] * K + K2) / norm;
+    }
   }
-  arm_biquad_cascade_df1_init_f32(&cmsis_hpf[0], 1, cmsis_hpf_coeffs, cmsis_hpf_state[0]);
-  arm_biquad_cascade_df1_init_f32(&cmsis_hpf[1], 1, cmsis_hpf_coeffs, cmsis_hpf_state[1]);
+  arm_biquad_cascade_df1_init_f32(&cmsis_hpf[0], 2, cmsis_hpf_coeffs, cmsis_hpf_state[0]);
+  arm_biquad_cascade_df1_init_f32(&cmsis_hpf[1], 2, cmsis_hpf_coeffs, cmsis_hpf_state[1]);
 #endif
 #if DSP_ENABLE_LPF
-  /* 2nd-order Butterworth LPF via bilinear transform.
-     b0 = K²/norm, b1 = 2K²/norm, b2 = K²/norm  (same norm as HPF at same fc) */
+  /* 4th-order Butterworth LPF = two cascaded 2nd-order sections via bilinear
+     transform (same damping pair as the HPF):
+       b0 = K²/norm, b1 = 2K²/norm, b2 = K²/norm,  norm = 1 + d·K + K² */
   {
-    float32_t K    = tanf(DSP_PI * DSP_LPF_CUTOFF_HZ / (float32_t)AUDIO_FREQUENCY);
-    float32_t K2   = K * K;
-    float32_t norm = 1.0f + 1.41421356f * K + K2;
-    cmsis_lpf_coeffs[0] =  K2 / norm;
-    cmsis_lpf_coeffs[1] =  2.0f * K2 / norm;
-    cmsis_lpf_coeffs[2] =  K2 / norm;
-    cmsis_lpf_coeffs[3] =  2.0f * (1.0f - K2) / norm;
-    cmsis_lpf_coeffs[4] = -(1.0f - 1.41421356f * K + K2) / norm;
+    static const float32_t d[2] = { DSP_BUTTER4_D0, DSP_BUTTER4_D1 };
+    float32_t K  = tanf(DSP_PI * DSP_LPF_CUTOFF_HZ / (float32_t)AUDIO_FREQUENCY);
+    float32_t K2 = K * K;
+    for (uint32_t s = 0; s < 2; s++)
+    {
+      float32_t norm = 1.0f + d[s] * K + K2;
+      cmsis_lpf_coeffs[5 * s + 0] =  K2 / norm;
+      cmsis_lpf_coeffs[5 * s + 1] =  2.0f * K2 / norm;
+      cmsis_lpf_coeffs[5 * s + 2] =  K2 / norm;
+      cmsis_lpf_coeffs[5 * s + 3] =  2.0f * (1.0f - K2) / norm;
+      cmsis_lpf_coeffs[5 * s + 4] = -(1.0f - d[s] * K + K2) / norm;
+    }
   }
-  arm_biquad_cascade_df1_init_f32(&cmsis_lpf[0], 1, cmsis_lpf_coeffs, cmsis_lpf_state[0]);
-  arm_biquad_cascade_df1_init_f32(&cmsis_lpf[1], 1, cmsis_lpf_coeffs, cmsis_lpf_state[1]);
+  arm_biquad_cascade_df1_init_f32(&cmsis_lpf[0], 2, cmsis_lpf_coeffs, cmsis_lpf_state[0]);
+  arm_biquad_cascade_df1_init_f32(&cmsis_lpf[1], 2, cmsis_lpf_coeffs, cmsis_lpf_state[1]);
 #endif
 #if DSP_ENABLE_CONV
   /* Coefficients in reverse order as required by arm_fir_f32.
