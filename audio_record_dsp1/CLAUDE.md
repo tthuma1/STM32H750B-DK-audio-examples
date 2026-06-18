@@ -33,36 +33,37 @@ mics ─PDM→ SAI4_A ─BDMA Ch1→ recordPDMBuf (D3 SRAM @0x38000000)
 
 ## DSP stage
 
-`DSP_Process` (in `main.c`) edits the PCM in place, applying five combinable
+`DSP_Process` (in `dsp.c`) edits the PCM in place, applying five combinable
 effects as a fixed chain **HPF → LPF → reverb → conv → RIR**: one-pole RC
 high/low pass, an IIR feedback delay line, an 8-tap moving-average smoothing
 FIR (`dsp_conv_kernel`), and a Room Impulse Response convolution
 (`dsp_rir_kernel`, a long FIR — synthetic exp-decay room response built at
 startup by `DSP_RIR_Build`, tunable via `DSP_RIR_RT60_MS`/`_LEN_MS`/`_WET`).
-Tune via the `DSP_*` `#define`s in `USER CODE BEGIN PD`; disabled effects
+Tune via the `DSP_*` `#define`s at the top of `dsp.h`; disabled effects
 (`DSP_ENABLE_*` = 0) compile out.
 
 ## Where the logic lives
 
-All application code is in the CubeMX `USER CODE` blocks of:
+The application code lives in:
 
-- **`Core/Src/main.c`** — init, buffer declarations, the DSP stage
-  (`DSP_Process` + its `#define` config and per-channel state), the two record
-  callbacks (the actual loopback logic), `MPU_Config`, clock config.
+- **`Core/Src/dsp.c` + `Core/Inc/dsp.h`** — the software DSP stage: `DSP_Process`,
+  the synthetic-RIR builder `DSP_RIR_Build`, the CMSIS-DSP setup `DSP_CMSIS_Init`,
+  all per-channel/CMSIS filter state, and the `DSP_*` `#define` configuration
+  (effect enables + tunables, plus the `DSP_USE_CMSIS` custom-vs-CMSIS switch).
+- **`Core/Src/main.c`** — init, buffer declarations, the two record callbacks
+  (the actual loopback logic), `MPU_Config`, clock config, the `ENABLE_*CACHE`
+  toggles. In the CubeMX `USER CODE` blocks.
 - **`Core/Inc/main.h`** — `AUDIO_FREQUENCY`, `AUDIO_IN_PDM_BUFFER_SIZE`,
   `AUDIO_BUFF_SIZE`.
-
-Everything else is generated or vendor code; regenerating from the `.ioc`
-preserves only the `USER CODE` regions.
 
 ## File structure
 
 ```
 audio_record_cubemx1.ioc      CubeMX project — edit peripherals/pins here, then regenerate
 Core/
-  Inc/   main.h, stm32h7xx_hal_conf.h, stm32h7xx_it.h
-  Src/   main.c, stm32h7xx_hal_msp.c (peripheral MSP init), stm32h7xx_it.c (ISRs),
-         system_stm32h7xx.c, sys{calls,mem}.c
+  Inc/   main.h, dsp.h (DSP config + public API), stm32h7xx_hal_conf.h, stm32h7xx_it.h
+  Src/   main.c, dsp.c (software DSP stage), stm32h7xx_hal_msp.c (peripheral MSP init),
+         stm32h7xx_it.c (ISRs), system_stm32h7xx.c, sys{calls,mem}.c
   Startup/  startup_stm32h750xbhx.s
 PDM2PCM/App/        pdm2pcm.c/.h — PDM2PCM middleware glue (MX_PDM2PCM_Init)
 Drivers/
