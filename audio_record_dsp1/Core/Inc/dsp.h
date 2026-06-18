@@ -18,16 +18,16 @@ extern "C" {
 #include "main.h"   /* AUDIO_FREQUENCY, AUDIO_IN_PDM_BUFFER_SIZE, AUDIO_BUFF_SIZE */
 
 /* ---- CMSIS-DSP comparison switch ---- */
-#define DSP_USE_CMSIS       0   /* 0 = custom hand-rolled, 1 = ARM CMSIS-DSP */
+#define DSP_USE_CMSIS       1   /* 0 = custom hand-rolled, 1 = ARM CMSIS-DSP */
 
 /* DSP configuration ---------------------------------------------------------*/
 /* ---- DSP selection (independent, combinable; chained GATE -> HPF -> LPF -> reverb -> conv -> RIR) ---- */
-#define DSP_ENABLE_GATE     1          /* noise gate / downward expander (runs first in the chain) */
+#define DSP_ENABLE_GATE     0         /* noise gate / downward expander (runs first in the chain) */
 #define DSP_ENABLE_HPF      0
 #define DSP_ENABLE_LPF      0
 #define DSP_ENABLE_REVERB   0
 #define DSP_ENABLE_CONV     0          /* FIR convolution (single echo) */
-#define DSP_ENABLE_RIR      0          /* Room Impulse Response convolution (room acoustics) */
+#define DSP_ENABLE_RIR      1          /* Room Impulse Response convolution (room acoustics) */
 
 /* ---- Tunables ---- */
 #define DSP_HPF_CUTOFF_HZ   5000.0f
@@ -54,9 +54,9 @@ extern "C" {
    FIR whose cost scales linearly with the tap count (= LEN_MS * fs / 1000).
    Make sure that DSP_RIR_NTAPS will be small enough.
    */
-#define DSP_RIR_RT60_MS     20         /* target reverb time of the synthetic room (RT60) */
-#define DSP_RIR_LEN_MS      8          /* length of the impulse response actually convolved */
-#define DSP_RIR_WET         0.25f      /* wet amount: 0 = dry only, larger = more reverb tail */
+#define DSP_RIR_RT60_MS     500         /* target reverb time of the synthetic room (RT60) */
+#define DSP_RIR_LEN_MS      10         /* length of the impulse response actually convolved */
+#define DSP_RIR_WET         0.85f      /* wet amount: 0 = dry only, larger = more reverb tail */
 
 /* Exported functions prototypes ---------------------------------------------*/
 void DSP_Process(uint16_t *pcm, uint32_t frames);
