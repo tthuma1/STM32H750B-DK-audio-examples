@@ -1,34 +1,9 @@
-# STM32H750-DK-examples
+This repository contains examples for the STM32H750B-DK board (STM32H750XBH6 MCU).
+There is a README in each folder that explains each example in further detail.
+Boilerplate code was generated with STM32CubeMX vXXX TODO; STM32CubeIDE vXXX TODO was used for building and flashing.
 
-### 15/05/2026 Instruction for BSP folder
-
-The `BSP` folder currently contains minimal working audio record/playback demo using the BSP project.
-
-### Startup
-
-- Load ExtMem_Boot (https://github.com/STMicroelectronics/STM32CubeH7/tree/master/Projects/STM32H750B-DK/Templates/ExtMem_Boot) into internal flash.
-- Build the project in the `BSP` folder.
-- Open STM32CubeProgrammer and upload `BSP\STM32CubeIDE\Debug` to address `0x90000000`
-- Done. Sound from the embedded MEMS microphone goes into the speaker connected to Line Out (green 3.5mm)
-
-### DMA to INT and polling conversion for microphone data
-
-Search for `BSP_AUDIO_IN_RecordPDM` in `BSP/Src/main.c`. This method is defined in `BSP\Drivers\BSP\STM32H750B-DK\stm32h750b_discovery_audio.c`, which uses `HAL_SAI_Receive_DMA`. Replace the `HAL_SAI_Receive_DMA` call with `HAL_SAI_Receive` (polling) or `HAL_SAI_Receive_IT` (interrupt based) calls and write interrupt callbacks as needed.
-
-Currently this callback is used for `HAL_SAI_Receive_DMA` in `BSP\Drivers\BSP\STM32H750B-DK\stm32h750b_discovery_audio.c`. Something similar should work with `HAL_SAI_Receive_IT`:
-
-```c
-void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
-{
-  /* Call the record update function to get the second half */
-  if (hsai->Instance == AUDIO_IN_SAIx)
-  {
-    BSP_AUDIO_IN_TransferComplete_CallBack(0);
-  }
-  else
-  {
-    BSP_AUDIO_IN_TransferComplete_CallBack(1);
-  }
-}
-```
-
+The examples included are:
+- `audio_play_minimal`: A tutorial on playing audio through the built-in Line Out port (green TRS 3.5mm, marked as CN9) using a simple sine wave.
+- `audio_record_minimal`: A tutorial on how to capture audio from the built-in MEMS microphone (IMP34DT05TR, marked as U34) and play it back via the Line Out port.
+- `audio_dsp_process`: Demonstrates basic DSP processing of MEMS microphone data. Includes low- and high-pass filters, an amplitude gate, FIR smoothing, and reverb via IIR and RIR (long FIR) filters.
+- `audio_speed_compare`: Compares CPU time required to capture and process MEMS microphone data using DMA, interrupt-based SAI, and SAI polling.
