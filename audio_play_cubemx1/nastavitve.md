@@ -176,13 +176,9 @@ Nastavi linker:
 - dodaj `../Drivers/BSP/STM32H750B-DK`
 
 Data flow:
-MEMS mics ──PDM──▶ SAI4_A (PDM mode) ──BDMA Ch1──▶ recordPDMBuf (D3 SRAM @0x38000000)
-                                                          │
-                                       BDMA half/cplt IRQ │  CPU: BSP_AUDIO_IN_PDMToPCM()
-                                                          ▼
-                                              RecPlayback ring buffer (AXI SRAM, D1)
-                                                          │
-                                       DMA2_Stream1 ◀─────┘ (circular, mem→periph)
-                                                          ▼
-                                           SAI2_A ──I2S──▶ WM8994 ──▶ green line-out jack
-                          (WM8994 registers are set over I2C4)
+SRAM buffer (int16 stereo)
+   ▼  DMA2_Stream1  (circular, mem→periph, request SAI2_A)
+SAI2 Block A TX  ──I2S── PI4=MCLK, PI5=SCK, PI6=SD, PI7=FS (AF10) ──▶
+WM8994 codec  (control registers are set over I2C4)
+   ▼
+green LINE-OUT / headphone jack
