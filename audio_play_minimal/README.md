@@ -22,6 +22,13 @@ WM8994 codec  (control registers are set over I2C4)
 green Line Out jack
 ```
 
+### Schematics
+
+It may be useful to take a look at the schematic, taken from https://www.st.com/resource/en/schematic_pack/mb1381-h750xb-b04.pdf.
+
+![Audio schematics overview](./assets/schem_min.png)
+![Full audio schematics](./assets/schem_full.png)
+
 # 1. Create the project
 
 - Create a new project in CubeMX.
