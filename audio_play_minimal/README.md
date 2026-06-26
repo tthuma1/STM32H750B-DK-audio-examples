@@ -5,6 +5,23 @@ The project is created with STM32CubeMX v6.17.0 with STM32CubeH7 MCU Firmware Pa
 
 Enabling D- and I-cache is not necessary in this project, but is kept as a good practice for audio processing on embedded systems.
 
+# Project overview
+
+### Data flow:
+
+```
+SRAM buffer (filled with GenerateTone())
+   ▼  DMA2_Stream1  (circular, mem→periph, request SAI2_A)
+SAI2 Block A TX
+   │
+   I2S transmission protocol
+   │
+   ▼
+WM8994 codec  (control registers are set over I2C4)
+   ▼
+green Line Out jack
+```
+
 # 1. Create the project
 
 - Create a new project in CubeMX.

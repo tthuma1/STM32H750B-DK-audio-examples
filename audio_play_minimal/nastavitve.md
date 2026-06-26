@@ -192,9 +192,13 @@ Nastavi linker:
 - dodaj `../Drivers/BSP/STM32H750B-DK`
 
 Data flow:
-SRAM buffer (int16 stereo)
+SRAM buffer (filled with GenerateTone())
    ▼  DMA2_Stream1  (circular, mem→periph, request SAI2_A)
-SAI2 Block A TX  ──I2S── PI4=MCLK, PI5=SCK, PI6=SD, PI7=FS (AF10) ──▶
+SAI2 Block A TX
+   │
+   I2S transmission protocol
+   │
+   ▼
 WM8994 codec  (control registers are set over I2C4)
    ▼
-green LINE-OUT / headphone jack
+green Line Out jack
