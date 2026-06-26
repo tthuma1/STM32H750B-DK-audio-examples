@@ -26,15 +26,8 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum {
-  BUFFER_OFFSET_NONE = 0,
-  BUFFER_OFFSET_HALF,
-  BUFFER_OFFSET_FULL,
-}BUFFER_StateTypeDef;
-
 typedef struct {
   uint8_t buff[AUDIO_BUFFER_SIZE];
-  BUFFER_StateTypeDef state;
 }AUDIO_BufferTypeDef;
 /* USER CODE END PTD */
 
@@ -64,7 +57,6 @@ void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
-void AUDIO_Process(void);
 void GenerateTone(int16_t *dst, uint32_t samples);
 /* USER CODE END PFP */
 
@@ -132,7 +124,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    AUDIO_Process();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -232,23 +223,6 @@ static void MX_CRC_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void AUDIO_Process(void)
-{
-  if (buffer_ctl.state == BUFFER_OFFSET_HALF)
-  {
-    GenerateTone((int16_t *)&buffer_ctl.buff[0], (AUDIO_BUFFER_SIZE / 2) / 4);
-    buffer_ctl.state = BUFFER_OFFSET_NONE;
-    SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[0], AUDIO_BUFFER_SIZE / 2);
-  }
-
-  if (buffer_ctl.state == BUFFER_OFFSET_FULL)
-  {
-    GenerateTone((int16_t *)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2], (AUDIO_BUFFER_SIZE / 2) / 4);
-    buffer_ctl.state = BUFFER_OFFSET_NONE;
-    SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_SIZE / 2);
-  }
-}
-
 /**
   * @brief  Manages the full Transfer complete event.
   * @param  None
@@ -256,8 +230,9 @@ void AUDIO_Process(void)
   */
 void BSP_AUDIO_OUT_TransferComplete_CallBack(uint32_t Interface)
 {
-  /* allows AUDIO_Process() to refill 2nd part of the buffer  */
-  buffer_ctl.state = BUFFER_OFFSET_FULL;
+  /* refill 2nd half of the buffer (the half the DMA just finished playing) */
+  GenerateTone((int16_t *)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2], (AUDIO_BUFFER_SIZE / 2) / 4);
+  SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_SIZE / 2);
 }
 
 /**
@@ -267,8 +242,9 @@ void BSP_AUDIO_OUT_TransferComplete_CallBack(uint32_t Interface)
   */
 void BSP_AUDIO_OUT_HalfTransfer_CallBack(uint32_t Interface)
 {
-  /* allows AUDIO_Process() to refill 1st part of the buffer  */
-  buffer_ctl.state = BUFFER_OFFSET_HALF;
+  /* refill 1st half of the buffer (the half the DMA just finished playing) */
+  GenerateTone((int16_t *)&buffer_ctl.buff[0], (AUDIO_BUFFER_SIZE / 2) / 4);
+  SCB_CleanDCache_by_Addr((uint32_t*)&buffer_ctl.buff[0], AUDIO_BUFFER_SIZE / 2);
 }
 
 /**

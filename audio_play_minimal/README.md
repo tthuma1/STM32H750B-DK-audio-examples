@@ -3,9 +3,14 @@
 The following tutorial presents how to play audio through the built-in Line Out port (green TRS 3.5mm, marked as CN9) on STM32H750B-DK.
 The project is created with STM32CubeMX v6.17.0 with STM32CubeH7 MCU Firmware Package v1.13.0; STM32CubeIDE v2.1.1 was used for building and flashing.
 
-Enabling D- and I-cache is not necessary in this project, but is kept as a good practice for audio processing on embedded systems.
+Enabling D- and I-cache is not necessary in this project, but is kept as a good practice for audio processing on embedded systems. The same is true for using the HSE clock as the source clock for SAI instead of HSI.
 
 # Project overview
+
+The MCU generates 16-bit stereo PCM samples in RAM, hands
+the buffer to a DMA engine that streams it to a serial-audio peripheral, which clocks the bits
+out to an external codec chip that does the digital-to-analog conversion and drives the
+jack.
 
 ### Data flow:
 
@@ -21,6 +26,54 @@ WM8994 codec  (control registers are set over I2C4)
    ▼
 green Line Out jack
 ```
+
+### Peripherals used
+
+**SAI (Serial Audio Interface)**: the peripheral that serializes PCM samples onto an
+audio bus. It is split into two independent blocks, *Block A* and *Block B*,
+each with its own clock, FIFO and pins. This project
+uses **SAI2 Block A** as the transmitter. The SAI generates four wires:
+
+- **SD** (serial data, PI6)
+- **SCK** (bit clock, PI5)
+- **FS** (frame sync / word select, PI7): indicates the start of the serial data (start of the frame)
+- **MCLK** (master clock, PI4): a high-frequency reference clock (multiple of the audio sample rate `Fs`) that synchronizes the audio data transfer and the codec
+
+All four pins are configured for their respective functions with alternate-function **AF10**.
+
+**I2S**: the framing protocol used between SAI2 and WM8994 (Philips I²S
+standard: MSB-first, data delayed one bit after FS, FS low = left channel).
+
+**WM8994**: Cirrus stereo codec that receives the I2S stream,
+performs the D/A conversion and amplifies the result to the Line-Out / headphone jack. Its control registers (input routing, DAC path,
+volume, power) are configured by the BSP driver over **I2C4**.
+
+**DMA (Direct Memory Access)**: moves the sample buffer from SRAM into the SAI's data register
+with no CPU involvement. The DMA is organized into **streams**; each stream is wired to one
+peripheral request. Here **DMA2 Stream 1** is mapped to the `SAI2_A` request, configured
+memory→peripheral, **circular**, 16-bit. Circular means that when the stream reaches the end of
+the buffer it wraps to the start and keeps going forever.
+
+### Gapless audio transmission with double-buffering
+
+The audio buffer is treated as two halves. The DMA raises an interrupt at the buffer
+midpoint (**half-transfer**) and at the end (**transfer-complete**). On half-transfer the DMA is
+now playing the second half, so the CPU regenerates the first half; on transfer-complete it
+is playing the first half, so the CPU refills the second.
+
+Because the D-Cache is enabled, after the CPU writes samples it must
+`SCB_CleanDCache_by_Addr()` that region so the DMA reads the fresh data from SRAM and not stale
+cache. The buffer is `ALIGN_32BYTES` to match the 32-byte cache-line granularity of those
+maintenance operations.
+
+### Clocking
+
+- **CPU / bus clocks** come from **HSI** (the 64 MHz internal RC oscillator).
+- **The audio sample clock** must be exact, so it is derived from **HSE** (the board's external
+  25 MHz crystal) through PLL2, set up inside the BSP driver's `MX_SAI2_ClockConfig()`. PLL2 is used as a source clock for SAI2. For the
+  48 kHz family (which includes 96 kHz, currently used in this project) PLL2 produces ≈49.14 MHz
+  (HSE 25 MHz ÷ PLL2M 25 = 1 MHz VCO input, ×PLL2N 344 = 344 MHz, ÷PLL2P 7), which the SAI then
+  divides down to the exact MCLK and SCK for the requested Fs.
 
 ### Schematics
 
@@ -314,4 +367,4 @@ Open the project in STM32CubeIDE and navigate to `Project` → `Properties` → 
 
 # Notes
 
-Adjust your speaker/headphones volume before running this example. Volume can also be changed through `AudioOutInit.Volume` in `main.c` or by chaning the `AMPLITUDE` in `main.h`.
+Adjust your speaker/headphones volume before running this example. Volume can also be changed through `AudioOutInit.Volume` in `main.c` or by changing the `AMPLITUDE` in `main.h`.
