@@ -9,7 +9,7 @@ Enabling D- and I-cache is not necessary in this project, but is kept as a good 
 
 The MCU generates 16-bit stereo PCM samples in RAM, hands
 the buffer to a DMA engine that streams it to a serial-audio peripheral, which clocks the bits
-out to an external codec chip that does the digital-to-analog conversion and drives the
+out to the external codec chip that does the digital-to-analog conversion and drives the line-out
 jack.
 
 ### Data flow:

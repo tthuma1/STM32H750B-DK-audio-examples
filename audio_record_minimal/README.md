@@ -7,10 +7,11 @@ Enabling D- and I-cache is not necessary in this project, but is kept as a good 
 
 # Project overview
 
-The MCU generates 16-bit stereo PCM samples in RAM, hands
-the buffer to a DMA engine that streams it to a serial-audio peripheral, which clocks the bits
-out to an external codec chip that does the digital-to-analog conversion and drives the
-jack.
+The on-board MEMS microphone outputs a 1-bit PDM stream that a serial-audio peripheral clocks
+into RAM via DMA. The CPU converts the PDM to 16-bit stereo PCM in the DMA interrupts and writes
+it into a playback buffer. A second DMA streams that PCM out through another serial-audio
+peripheral to the external codec chip, which does the digital-to-analog conversion and drives the
+line-out jack.
 
 ### Data flow:
 
@@ -29,30 +30,51 @@ MEMS mics ──PDM──▶ SAI4_A (PDM mode) ──BDMA Ch1──▶ recordPDM
 
 ### Peripherals used
 
-**SAI (Serial Audio Interface)**: the peripheral that serializes PCM samples onto an
-audio bus. It is split into two independent blocks, *Block A* and *Block B*,
-each with its own clock, FIFO and pins. This project
-uses **SAI2 Block A** as the transmitter. The SAI generates four wires:
+**MEMS microphone (IMP34DT05TR)**: on-board digital MEMS microphone. It outputs a
+1-bit-per-sample **PDM** (Pulse-Density Modulation) bitstream on one data line. The driver treats
+it as a stereo PDM pair (LR) and samples both the rising and falling edges of the mic clock, so the
+left and right channels are both drawn from this one microphone.
 
-- **SD** (serial data, PI6)
-- **SCK** (bit clock, PI5)
-- **FS** (frame sync / word select, PI7): indicates the start of the serial data (start of the frame)
-- **MCLK** (master clock, PI4): a high-frequency reference clock (multiple of the audio sample rate `Fs`) that synchronizes the audio data transfer and the codec
+**PDM (Pulse-Density Modulation)**: the 1-bit oversampled format the mic emits. It doesn't contain PCM samples 
+directly, so the high-rate bitstream has to be low-pass filtered and downsampled into 16-bit PCM. This PDM→PCM
+conversion is done by the CPU (`BSP_AUDIO_IN_PDMToPCM()`) inside the record DMA callbacks.
 
-All four pins are configured for their respective functions with alternate-function **AF10**.
+**SAI (Serial Audio Interface)**: the peripheral that serializes PCM samples onto an audio bus. It is
+split into two independent blocks, *Block A* and *Block B*, each with its own clock, FIFO and
+pins. This project uses two SAI instances:
 
-**I2S**: the framing protocol used between SAI2 and WM8994 (Philips I²S
+- **SAI4 Block A** as the **receiver** in PDM mode: it supplies the mic clock and samples the
+  incoming PDM bitstream from the microphone.
+- **SAI2 Block A** as the **transmitter** to the codec. It generates four wires:
+  - **SD** (serial data, PI6)
+  - **SCK** (bit clock, PI5)
+  - **FS** (frame sync / word select, PI7): indicates the start of the serial data (start of the frame)
+  - **MCLK** (master clock, PI4): a high-frequency reference clock (multiple of the audio sample rate `Fs`) that synchronizes the audio data transfer and the codec
+
+  All four SAI2 pins are configured for their respective functions with alternate-function **AF10**.
+
+**I2S**: the framing protocol used on the SAI2-to-WM8994 link (Philips I²S
 standard: MSB-first, data delayed one bit after FS, FS low = left channel; 32-bit slot (L+R), 16-bit data).
 
 **WM8994**: Cirrus stereo codec that receives the I2S stream,
 performs the D/A conversion and amplifies the result to the Line-Out / headphone jack. Its control registers (input routing, DAC path,
 volume, power) are configured by the BSP driver over **I2C4**.
 
-**DMA (Direct Memory Access)**: moves the sample buffer from SRAM into the SAI's data register
-with no CPU involvement. The DMA is organized into **streams**; each stream is wired to one
-peripheral request. Here **DMA2 Stream 1** is mapped to the `SAI2_A` request, configured
-memory→peripheral, **circular**, 16-bit. Circular means that when the stream reaches the end of
-the buffer it wraps to the start and keeps going forever.
+**DMA (Direct Memory Access)**: moves audio buffers between SRAM and the SAI data registers with
+no CPU involvement.  Two separate DMA controllers are used, one per direction:
+
+- **BDMA Channel 1** (record): moves the PDM bitstream from `SAI4_A` into `recordPDMBuf`,
+  **circular**, 16-bit. BDMA lives in the D3 domain and is the only DMA that can
+  reach the SAI4 peripheral; it can also only access **D3 SRAM** (`0x38000000`), which is why
+  `recordPDMBuf` is forced there.
+- **DMA2 Stream 1** (playback): mapped to the `SAI2_A` request, memory→peripheral, **circular**,
+  16-bit. It streams the PCM ring buffer out to the codec.
+
+The DMA is organized into **streams**; each stream is wired to one
+peripheral request.
+**Circular** means that when the controller reaches the end of the buffer it wraps to the start
+and keeps going forever. Both DMAs raise half-transfer and transfer-complete interrupts that
+drive the buffer handling.
 
 ### Gapless audio transmission with double-buffering
 
