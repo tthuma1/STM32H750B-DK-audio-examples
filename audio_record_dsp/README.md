@@ -315,12 +315,15 @@ same convolution, they just index history differently. The linear buffer in the 
 because `arm_fir_f32`'s inner loop needs contiguous memory to unroll,
 and a circular buffer wouldn't work with that.
 
-> ⚠️ **Cost warning.** The RIR is a plain time-domain FIR, so its cost scales
+> ⚠️ **Warning.** The RIR is a plain time-domain FIR, so its cost scales
 > linearly with the tap count `N = DSP_RIR_LEN_MS · fs / 1000`. In this project
 > the M7 runs at only 64 MHz (HSI, no PLL), giving a `DSP_Process` callback just
 > ~64000 cycles per 1 ms block to do everything (PDM→PCM, the effect chain,
-> cache maintenance). Keep `DSP_RIR_LEN_MS` small enough that the convolution
-> fits in the budget.
+> cache maintenance). The Cortex-M7 also has no ARM NEON SIMD, so CMSIS can't
+> vectorize the convolution and it's much slower than it would be on a
+> NEON-capable core. Keep `DSP_RIR_LEN_MS` small enough that the convolution
+> fits in the budget. If you increase the clock speed, you can make the RIR effect
+> much stronger and more realistic.
 
 # D-cache toggling
 
@@ -364,6 +367,6 @@ Copy these files from this example project to your project:
 
 - If you hear wierd electric buzzing when running DSP processing, it is very likely that
 your code is too slow and DMA starts reading data before it has finished processing.
-In this case, try to run the SysClock at a faster frequency or optimize your code.
+In this case, try to run the SysClock at a higher frequency or optimize your code.
 The M7 core is not capable of very complex real-time DSP operations.
 - For testing the DSP operations, it is useful to find a song with many different frequencies (a lot of bass and hi-hats) and play it next to the MEMS microphone.
