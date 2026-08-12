@@ -1,4 +1,4 @@
-# STM32H750B-DK Audio Capture Speed Compariso: DMA vs. Interrupt vs. Pollingn
+# STM32H750B-DK Audio Capture Speed Comparison: DMA vs. Interrupt vs. Polling
 
 This project extends the `audio_record_minimal` project with comparing CPU time of different transfer modes of data between
 the SAI peripheral and SRAM. 
@@ -14,7 +14,7 @@ how the PDM bitstream gets from SAI4 into RAM (the `audio_record_minimal` exampl
 
 ## Selecting the mode
 
-Set one macro in `Core/Inc/main.h`, rebuild, and read `g_work_cycles`:
+Set the `SAI_RX_MODE` macro in `Core/Inc/main.h`, rebuild, and read `g_work_cycles`:
 
 ```c
 #define SAI_RX_MODE   SAI_RX_MODE_DMA     /* 0: BDMA circular, half + complete callbacks */
@@ -37,7 +37,7 @@ block — watch it live in the debugger. Measured with the **DWT cycle counter**
 For DMA, `g_work_cycles` will be just the PDM→PCM conversion. For IT, it will include the accumulated word-transfer time in ISR calls plus PDM→PCM. For polling, it captures the full blocking wait plus PDM→PCM.
 
 
-Expected ordering (per `main.h`): **DMA < IT < Polling**. DMA offloads the
+Expected ordering: **DMA < IT < Polling**. DMA offloads the
 transfer entirely; IT pays per-FIFO ISR entry/exit overhead; polling burns the
 CPU spinning on the FIFO for the whole block.
 
