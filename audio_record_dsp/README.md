@@ -34,7 +34,7 @@ filter.
 | **Low-pass filter** | Removes high-frequency hiss; keeps everything below the cutoff | 1st-order one-pole low-pass IIR (Butterworth, bilinear transform) | 4th-order Butterworth low-pass (cascade of two biquads) |
 | **Reverb** | Adds a simple metallic echo/decay tail | IIR feedback delay-line (comb) | Same loop (no CMSIS equivalent) |
 | **Moving average** | Smooths the signal (treble reduction) | 8-tap equal-weight moving-average FIR | 8-tap equal-weight FIR via `arm_fir_f32` |
-| **RIR** | Convolves with a synthetic room response for realistic reverberation, with wet/dry mix and makeup gain | Long FIR via circular history buffer | Long FIR via `arm_fir_f32` (time-reversed coeffs) over a linear state buffer with block shifting |
+| **RIR** | Convolves with a synthetic room response for realistic reverberation, with wet/dry mix and makeup gain | Long FIR via circular history buffer | Long FIR via `arm_fir_f32` over a linear state buffer with block shifting |
 
 All cutoff frequencies, delay times, tap counts, gate thresholds and reverb
 parameters live as `#define`s at the top of `dsp.h`. Filter
@@ -310,7 +310,10 @@ to the tail, runs a straight (non-modular) multiply-accumulate, and at the end
 a sliding delay line rather than a wrapping index. That is why its state array is `frames
 − 1` longer than the tap count, and why it expects its coefficients
 **time-reversed**, so `DSP_CMSIS_Init` reverses `dsp_rir_kernel[]` into
-`cmsis_rir_coeffs[]` before initialising the filter.
+`cmsis_rir_coeffs[]` before initialising the filter. Both paths compute the exact
+same convolution, they just index history differently. The linear buffer in the CMSIS path exists
+because `arm_fir_f32`'s inner loop needs contiguous memory to unroll,
+and a circular buffer wouldn't work with that.
 
 > ⚠️ **Cost warning.** The RIR is a plain time-domain FIR, so its cost scales
 > linearly with the tap count `N = DSP_RIR_LEN_MS · fs / 1000`. In this project
