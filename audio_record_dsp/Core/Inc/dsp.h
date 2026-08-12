@@ -55,8 +55,8 @@ extern "C" {
    Make sure that DSP_RIR_NTAPS will be small enough.
    */
 #define DSP_RIR_RT60_MS     500         /* target reverb time of the synthetic room (RT60) */
-#define DSP_RIR_LEN_MS      10         /* length of the impulse response actually convolved */
-#define DSP_RIR_WET         0.85f      /* wet amount: 0 = dry only, larger = more reverb tail */
+#define DSP_RIR_LEN_MS      5         /* length of the impulse response actually convolved */
+#define DSP_RIR_WET         0.95f      /* wet amount: 0 = dry only, larger = more reverb tail */
 
 /* Exported functions prototypes ---------------------------------------------*/
 void DSP_Process(uint16_t *pcm, uint32_t frames);
