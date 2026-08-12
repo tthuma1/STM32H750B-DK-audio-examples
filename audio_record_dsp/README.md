@@ -210,8 +210,8 @@ one delay-length ago:
 $$
 \begin{aligned}
 y[n] &= x[n] + g \cdot y[n - D] \\
-D &= \mathrm{DSP\_REVERB\_DELAY\_MS} \cdot f_s / 1000 \quad (\text{delay in samples}) \\
-g &= \mathrm{DSP\_REVERB\_FEEDBACK} \quad (|g| < 1 \text{ for stability})
+D &= \text{DSP\_REVERB\_DELAY\_MS} \cdot f_s / 1000 \quad (\text{delay in samples}) \\
+g &= \text{DSP\_REVERB\_FEEDBACK} \quad (|g| < 1 \text{ for stability})
 \end{aligned}
 $$
 
@@ -253,7 +253,7 @@ makes it sound as though it were played in that room.
 $$
 \begin{aligned}
 y[n] &= \sum_{k=0}^{N-1} h[k] \cdot x[n-k] \\
-N &= \mathrm{DSP\_RIR\_LEN\_MS} \cdot f_s / 1000 \quad (\text{number of taps})
+N &= \text{DSP\_RIR\_LEN\_MS} \cdot f_s / 1000 \quad (\text{number of taps})
 \end{aligned}
 $$
 
