@@ -208,12 +208,12 @@ filter**). Each output sample is the input plus a scaled copy of what came out
 one delay-length ago:
 
 $$
-\begin{aligned}
-y[n] &= x[n] + g \cdot y[n - D] \\
-D &= \text{DSP\_REVERB\_DELAY\_MS} \cdot f_s / 1000 \quad (\text{delay in samples}) \\
-g &= \text{DSP\_REVERB\_FEEDBACK} \quad (|g| < 1 \text{ for stability})
-\end{aligned}
+y[n] = x[n] + g \cdot y[n - D]
 $$
+
+where `D` is the delay in samples (`D = DSP_REVERB_DELAY_MS · f_s / 1000`) and
+`g` is the feedback gain (`g = DSP_REVERB_FEEDBACK`, with `|g| < 1` required
+for stability).
 
 The feedback value is stored back into the circular `reverb_buf[ch]` so it
 re-circulates, decaying by a factor `g` each pass. With `g = 0.40` and an
@@ -251,11 +251,10 @@ response to an instantaneous click). Convolving any audio with that response
 makes it sound as though it were played in that room.
 
 $$
-\begin{aligned}
-y[n] &= \sum_{k=0}^{N-1} h[k] \cdot x[n-k] \\
-N &= \text{DSP\_RIR\_LEN\_MS} \cdot f_s / 1000 \quad (\text{number of taps})
-\end{aligned}
+y[n] = \sum_{k=0}^{N-1} h[k] \cdot x[n-k]
 $$
+
+where `N` is the number of taps (`N = DSP_RIR_LEN_MS · f_s / 1000`).
 
 **Building the RIR** (`DSP_RIR_Build`, run once at startup). The code uses a
 statistical room model rather than a measured response:
