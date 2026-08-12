@@ -73,7 +73,6 @@ void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
-static void CPU_CACHE_Enable(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/

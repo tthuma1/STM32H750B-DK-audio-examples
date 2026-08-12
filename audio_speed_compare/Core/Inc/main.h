@@ -64,8 +64,10 @@ void Error_Handler(void);
 #define SAI_RX_MODE_DMA     0   /* BDMA circular, half + complete callbacks */
 #define SAI_RX_MODE_IT      1   /* SAI FIFO interrupt, re-armed ping-pong   */
 #define SAI_RX_MODE_POLLING 2   /* blocking HAL_SAI_Receive in main loop    */
-#define SAI_RX_MODE         SAI_RX_MODE_DMA
 
+#define SAI_RX_MODE   SAI_RX_MODE_DMA     /* 0: BDMA circular, half + complete callbacks */
+                    /* SAI_RX_MODE_IT       1: SAI FIFO interrupt, restarted each half-buffer */
+                    /* SAI_RX_MODE_POLLING  2: blocking HAL_SAI_Receive in main loop    */
 #define AUDIO_FREQUENCY           16000U
 /* Number of uint16 elements in the PDM record buffer (two DMA halves) */
 #define AUDIO_IN_PDM_BUFFER_SIZE  (uint32_t)(128U*AUDIO_FREQUENCY/16000U*2U)
